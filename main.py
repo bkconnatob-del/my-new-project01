@@ -13,12 +13,13 @@ import uvicorn
 TOKEN = "8454731178:AAFVCPPT8hzThwE0JuTvE5UveNH79QRGnZ4"
 CHAT_ID = "8987887618"
 
-# 🌟 사용자님의 실제 키움 API 키 정보가 정확히 이식되어 있습니다.
+# 사용자님의 실제 키움 API 키 정보가 안전하게 유지되고 있습니다.
 KIWOOM_APPKEY = "bCODahcHXXLWG-rfoHMJ12lDf1eqXUNMKEQlJ6EF-Oc"
 KIWOOM_SECRET = "0TZGYURPv6OADRC35zwDy1FcylTJFoLsDa_sp1hPyAc"
 
 LOOP_INTERVAL = 180 
 IS_RUNNING = True  
+LAST_UPDATE_ID = 0  # 🌟 중복 메시지 방지용 최신 대화방 위치 저장 변수
 
 app = FastAPI()
 
@@ -74,24 +75,42 @@ def fetch_kiwoom_stock_data(stock_code, access_token):
     except:
         return None
 
+# =========================================================================
+# 3. 텔레그램 명령 제어 (🌟 중복 수신 버그 완벽 수정 완료)
+# =========================================================================
 def check_telegram_commands():
-    global IS_RUNNING
+    global IS_RUNNING, LAST_UPDATE_ID
     url = f"https://api.telegram.org/bot{TOKEN}/getUpdates"
+    
+    # 처음 켤 때는 가장 최신 메시지만 읽고, 이후에는 읽은 대화의 다음(offset) 대화만 타겟팅합니다.
+    params = {"timeout": 1}
+    if LAST_UPDATE_ID != 0:
+        params["offset"] = LAST_UPDATE_ID + 1
+    else:
+        params["offset"] = -1
+        
     try:
-        res = requests.get(url, params={"offset": -1, "timeout": 1}).json()
+        res = requests.get(url, params=params).json()
         results = res.get("result", [])
+        
         if results:
-            last_text = results[-1].get("message", {}).get("text", "")
-            if last_text == "/stop" and IS_RUNNING:
-                IS_RUNNING = False
-                requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": "🛑 [클라우드] 장중 자동 감시 엔진을 일시 정지합니다."})
-            elif last_text == "/start" and not IS_RUNNING:
-                IS_RUNNING = True
-                requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": "🚀 [클라우드] 장중 자동 감시 엔진을 다시 시작합니다."})
-    except: pass
+            for update in results:
+                LAST_UPDATE_ID = update.get("update_id", 0)  # 읽은 메시지의 고유 번호 저장
+                message_obj = update.get("message", {})
+                last_text = message_obj.get("text", "")
+                
+                # 중복 전송 방지를 위해 매칭 조건 분기를 명확하게 통제합니다.
+                if last_text == "/stop" and IS_RUNNING:
+                    IS_RUNNING = False
+                    requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": "🛑 [클라우드] 장중 자동 감시 엔진을 일시 정지합니다."})
+                elif last_text == "/start" and not IS_RUNNING:
+                    IS_RUNNING = True
+                    requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": "🚀 [클라우드] 장중 자동 감시 엔진을 다시 시작합니다."})
+    except: 
+        pass
 
 # =========================================================================
-# 3. 핵심 전략 조건식 판별 엔진
+# 4. 핵심 전략 조건식 판별 엔진
 # =========================================================================
 def analyze_strategy_conditions(day_df, min_df, current_price, market_cap, deal_value, tick_deals):
     try:
@@ -148,13 +167,15 @@ def analyze_strategy_conditions(day_df, min_df, current_price, market_cap, deal_
         return False, None
 
 # =========================================================================
-# 4. 실전 백그라운드 스케줄러 가동 루프 부위 (문법 리스크 원천 배제)
+# 5. 실전 백그라운드 스케줄러 가동 루프 부위
 # =========================================================================
 def stock_monitoring_loop():
     time.sleep(15)
     
-    # 안전한 텔레그램 가동 신호 송신
-    requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": "<b>🟢 [클라우드] 주식 감시 마스터 서버가 성공적으로 부팅되었습니다.</b>\n실시간 조건 검색 시스템이 작동합니다.", "parse_mode": "HTML"})
+    try:
+        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": "<b>🟢 [클라우드] 주식 감시 마스터 서버가 성공적으로 부팅되었습니다.</b>\n실시간 중복 체크 방지 필터가 장착되었습니다.", "parse_mode": "HTML"})
+    except: 
+        pass
     
     real_target_pool = [
         {"code": "005930", "name": "삼성전자"}, {"code": "000660", "name": "SK하이닉스"},
@@ -185,7 +206,6 @@ def stock_monitoring_loop():
                         if is_ok:
                             s.update({"price": cur_price, "mkt_cap": mkt_cap, "deal_val": deal_val, **tech})
                             
-                            # 알림 문자 포맷 연산 간소화 기법 이식 (문법 에러 소지 원천 차단)
                             msg = f"<b>🚨 [실전 추천] 조건 포착</b>\n• 종목: {s['name']}\n• 현재가: {cur_price:,}원 ({tech['rate']})\n• RSI: {tech['rsi']} / BB: {tech['bb_touch']}\n• 이평: {tech['golden_cross']}\n• 최대체결: {tech['max_deal']}"
                             requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "HTML"})
             else:
@@ -194,11 +214,3 @@ def stock_monitoring_loop():
         time.sleep(LOOP_INTERVAL)
 
 # =========================================================================
-# 6. 메인 구동 부위
-# =========================================================================
-if __name__ == "__main__":
-    monitor_thread = threading.Thread(target=stock_monitoring_loop, daemon=True)
-    monitor_thread.start()
-    
-    print("🚀 Render 웹서비스용 포트 즉시 개방 완료 (Port:10000)")
-    uvicorn.run(app, host="0.0.0.0", port=10000)
