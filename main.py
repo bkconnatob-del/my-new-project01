@@ -19,7 +19,7 @@ KIWOOM_SECRET = "0TZGYURPv6OADRC35zwDy1FcylTJFoLsDa_sp1hPyAc"
 
 LOOP_INTERVAL = 180 
 IS_RUNNING = True  
-LAST_UPDATE_ID = 0  # 🌟 중복 메시지 방지용 최신 대화방 위치 저장 변수
+LAST_UPDATE_ID = None  # 🌟 안정성을 위해 초기값을 None으로 전면 개편
 
 app = FastAPI()
 
@@ -34,8 +34,10 @@ def get_kiwoom_access_token():
     url = "https://kiwoom.com"
     payload = {"grant_type": "client_credentials", "appkey": KIWOOM_APPKEY, "secretkey": KIWOOM_SECRET}
     try:
-        res = requests.post(url, json=payload)
-        return res.json().get("access_token")
+        res = requests.post(url, json=payload, timeout=5)
+        if res.status_code == 200:
+            return res.json().get("access_token")
+        return None
     except:
         return None
 
@@ -46,13 +48,13 @@ def fetch_kiwoom_stock_data(stock_code, access_token):
     tick_url = "https://kiwoom.com"
     
     try:
-        res_day = requests.get(day_url, headers=headers, params={"stock_code": stock_code, "count": "65"}).json()
+        res_day = requests.get(day_url, headers=headers, params={"stock_code": stock_code, "count": "65"}, timeout=5).json()
         day_list = res_day.get("output", [])[::-1]
         df_day = pd.DataFrame(day_list)
         df_day["close"] = df_day["close_price"].astype(int)
         df_day["volume"] = df_day["acc_volume"].astype(int)
         
-        res_min = requests.get(min_url, headers=headers, params={"stock_code": stock_code, "minute_type": "5", "count": "50"}).json()
+        res_min = requests.get(min_url, headers=headers, params={"stock_code": stock_code, "minute_type": "5", "count": "50"}, timeout=5).json()
         min_list = res_min.get("output", [])[::-1]
         df_min = pd.DataFrame(min_list)
         df_min["close"] = df_min["close_price"].astype(float)
@@ -63,7 +65,7 @@ def fetch_kiwoom_stock_data(stock_code, access_token):
         market_cap = int(summary_info.get("market_cap_amount", 0)) 
         deal_value = int(summary_info.get("acc_deal_amount", 0)) 
         
-        res_tick = requests.get(tick_url, headers=headers, params={"stock_code": stock_code}).json()
+        res_tick = requests.get(tick_url, headers=headers, params={"stock_code": stock_code}, timeout=5).json()
         tick_list = res_tick.get("output", [])
         tick_deals = []
         for t in tick_list:
@@ -76,36 +78,32 @@ def fetch_kiwoom_stock_data(stock_code, access_token):
         return None
 
 # =========================================================================
-# 3. 텔레그램 명령 제어 (🌟 중복 수신 버그 완벽 수정 완료)
+# 3. 텔레그램 명령 제어 (🌟 무한 반복 에러 소지 완벽 수정)
 # =========================================================================
 def check_telegram_commands():
     global IS_RUNNING, LAST_UPDATE_ID
     url = f"https://api.telegram.org/bot{TOKEN}/getUpdates"
     
-    # 처음 켤 때는 가장 최신 메시지만 읽고, 이후에는 읽은 대화의 다음(offset) 대화만 타겟팅합니다.
     params = {"timeout": 1}
-    if LAST_UPDATE_ID != 0:
+    if LAST_UPDATE_ID is not None:
         params["offset"] = LAST_UPDATE_ID + 1
-    else:
-        params["offset"] = -1
         
     try:
-        res = requests.get(url, params=params).json()
+        res = requests.get(url, params=params, timeout=3).json()
         results = res.get("result", [])
         
         if results:
             for update in results:
-                LAST_UPDATE_ID = update.get("update_id", 0)  # 읽은 메시지의 고유 번호 저장
+                LAST_UPDATE_ID = update.get("update_id", 0)  
                 message_obj = update.get("message", {})
                 last_text = message_obj.get("text", "")
                 
-                # 중복 전송 방지를 위해 매칭 조건 분기를 명확하게 통제합니다.
                 if last_text == "/stop" and IS_RUNNING:
                     IS_RUNNING = False
-                    requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": "🛑 [클라우드] 장중 자동 감시 엔진을 일시 정지합니다."})
+                    requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": "🛑 [클라우드] 장중 자동 감시 엔진을 일시 정지합니다."}, timeout=3)
                 elif last_text == "/start" and not IS_RUNNING:
                     IS_RUNNING = True
-                    requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": "🚀 [클라우드] 장중 자동 감시 엔진을 다시 시작합니다."})
+                    requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": "🚀 [클라우드] 장중 자동 감시 엔진을 다시 시작합니다."}, timeout=3)
     except: 
         pass
 
@@ -173,7 +171,7 @@ def stock_monitoring_loop():
     time.sleep(15)
     
     try:
-        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": "<b>🟢 [클라우드] 주식 감시 마스터 서버가 성공적으로 부팅되었습니다.</b>\n실시간 중복 체크 방지 필터가 장착되었습니다.", "parse_mode": "HTML"})
+        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": "<b>🟢 [클라우드] 주식 감시 마스터 서버가 최종 가동되었습니다.</b>\n실시간 중복 체크 방지 필터가 장착되었습니다.", "parse_mode": "HTML"}, timeout=5)
     except: 
         pass
     
@@ -192,25 +190,22 @@ def stock_monitoring_loop():
     ]
     
     while True:
-        check_telegram_commands()  
-        if IS_RUNNING:
-            print("[스캐너] 지정 종목 실시간 수급 추적 진행 중...")
-            token = get_kiwoom_access_token()
-            
-            if token:
-                for s in real_target_pool:
-                    live_data = fetch_kiwoom_stock_data(s["code"], token)
-                    if live_data:
-                        day_df, min_df, cur_price, mkt_cap, deal_val, tick_deals = live_data
-                        is_ok, tech = analyze_strategy_conditions(day_df, min_df, cur_price, mkt_cap, deal_val, tick_deals)
-                        if is_ok:
-                            s.update({"price": cur_price, "mkt_cap": mkt_cap, "deal_val": deal_val, **tech})
-                            
-                            msg = f"<b>🚨 [실전 추천] 조건 포착</b>\n• 종목: {s['name']}\n• 현재가: {cur_price:,}원 ({tech['rate']})\n• RSI: {tech['rsi']} / BB: {tech['bb_touch']}\n• 이평: {tech['golden_cross']}\n• 최대체결: {tech['max_deal']}"
-                            requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "HTML"})
-            else:
-                print("▪️ [안내] 키움 토큰 미연결 상태 (장외 대기 패턴)")
+        # 🌟 통신 지연이나 토큰 만료 에러로 시스템이 멈추지 않도록 무한루프 내부에 철벽 예외처리 강화
+        try:
+            check_telegram_commands()  
+            if IS_RUNNING:
+                print("[스캐너] 지정 종목 실시간 수급 추적 진행 중...")
+                token = get_kiwoom_access_token()
                 
-        time.sleep(LOOP_INTERVAL)
-
-# =========================================================================
+                if token:
+                    for s in real_target_pool:
+                        live_data = fetch_kiwoom_stock_data(s["code"], token)
+                        if live_data:
+                            day_df, min_df, cur_price, mkt_cap, deal_val, tick_deals = live_data
+                            is_ok, tech = analyze_strategy_conditions(day_df, min_df, cur_price, mkt_cap, deal_val, tick_deals)
+                            if is_ok:
+                                s.update({"price": cur_price, "mkt_cap": mkt_cap, "deal_val": deal_val, **tech})
+                                
+                                msg = f"<b>🚨 [실전 추천] 조건 포착</b>\n• 종목: {s['name']}\n• 현재가: {cur_price:,}원 ({tech['rate']})\n• RSI: {tech['rsi']} / BB: {tech['bb_touch']}\n• 이평: {tech['golden_cross']}\n• 최대체결: {tech['max_deal']}"
+                                requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "HTML"}, timeout=3)
+                else:
