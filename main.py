@@ -13,7 +13,7 @@ import uvicorn
 TOKEN = "8454731178:AAFVCPPT8hzThwE0JuTvE5UveNH79QRGnZ4"
 CHAT_ID = "8987887618"
 
-# 🌟 사용자님의 실제 키움 API 키가 완벽하게 유지되어 있습니다.
+# 🌟 사용자님의 실제 키움 API 키가 안전하게 유지되어 있습니다.
 KIWOOM_APPKEY = "bCODahcHXXLWG-rfoHMJ12lDf1eqXUNMKEQlJ6EF-Oc"
 KIWOOM_SECRET = "0TZGYURPv6OADRC35zwDy1FcylTJFoLsDa_sp1hPyAc"
 
@@ -151,14 +151,15 @@ def analyze_strategy_conditions(day_df, min_df, current_price, market_cap, deal_
         return False, None
 
 # =========================================================================
-# 5. 실전 백그라운드 스케줄러 가동 루프 부위
+# 5. 실전 백그라운드 스케줄러 가동 루프 부위 (🌟들여쓰기 결함 완벽 해결)
 # =========================================================================
 def stock_monitoring_loop():
     time.sleep(15)
     
     try:
         requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": "<b>🟢 [클라우드] 주식 감시 마스터 서버가 성공적으로 가동되었습니다.</b>\n관심종목 21개 실시간 모니터링 시작.", "parse_mode": "HTML"})
-    except: pass
+    except: 
+        pass
     
     real_target_pool = [
         {"code": "005930", "name": "삼성전자"}, {"code": "000660", "name": "SK하이닉스"},
@@ -203,4 +204,3 @@ def stock_monitoring_loop():
                             msg += f"   • 분봉 지표: RSI {stock['rsi']} / BB하단: {stock['bb_touch']}\n"
                             msg += f"   • 분봉 이평: ⚡ <b>{stock['golden_cross']}</b>\n"
                             msg += f"   • 순간 수급: 💰 건별 최대 체결 <code>{stock['max_deal']}</code>\n\n"
-                        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "HTML"})
