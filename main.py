@@ -13,7 +13,7 @@ import uvicorn
 TOKEN = "8454731178:AAFVCPPT8hzThwE0JuTvE5UveNH79QRGnZ4"
 CHAT_ID = "8987887618"
 
-# 🌟 사용자님의 실제 키움 API 키가 안전하게 유지되어 있습니다.
+# 🌟 사용자님의 실제 키움 API 키 정보가 정확히 이식되어 있습니다.
 KIWOOM_APPKEY = "bCODahcHXXLWG-rfoHMJ12lDf1eqXUNMKEQlJ6EF-Oc"
 KIWOOM_SECRET = "0TZGYURPv6OADRC35zwDy1FcylTJFoLsDa_sp1hPyAc"
 
@@ -74,9 +74,6 @@ def fetch_kiwoom_stock_data(stock_code, access_token):
     except:
         return None
 
-# =========================================================================
-# 3. 텔레그램 명령 제어
-# =========================================================================
 def check_telegram_commands():
     global IS_RUNNING
     url = f"https://api.telegram.org/bot{TOKEN}/getUpdates"
@@ -94,7 +91,7 @@ def check_telegram_commands():
     except: pass
 
 # =========================================================================
-# 4. 핵심 전략 조건식 판별 엔진
+# 3. 핵심 전략 조건식 판별 엔진
 # =========================================================================
 def analyze_strategy_conditions(day_df, min_df, current_price, market_cap, deal_value, tick_deals):
     try:
@@ -151,15 +148,13 @@ def analyze_strategy_conditions(day_df, min_df, current_price, market_cap, deal_
         return False, None
 
 # =========================================================================
-# 5. 실전 백그라운드 스케줄러 가동 루프 부위 (🌟들여쓰기 결함 완벽 해결)
+# 4. 실전 백그라운드 스케줄러 가동 루프 부위 (문법 리스크 원천 배제)
 # =========================================================================
 def stock_monitoring_loop():
     time.sleep(15)
     
-    try:
-        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": "<b>🟢 [클라우드] 주식 감시 마스터 서버가 성공적으로 가동되었습니다.</b>\n관심종목 21개 실시간 모니터링 시작.", "parse_mode": "HTML"})
-    except: 
-        pass
+    # 안전한 텔레그램 가동 신호 송신
+    requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": "<b>🟢 [클라우드] 주식 감시 마스터 서버가 성공적으로 부팅되었습니다.</b>\n실시간 조건 검색 시스템이 작동합니다.", "parse_mode": "HTML"})
     
     real_target_pool = [
         {"code": "005930", "name": "삼성전자"}, {"code": "000660", "name": "SK하이닉스"},
@@ -176,31 +171,34 @@ def stock_monitoring_loop():
     ]
     
     while True:
-        try:
-            check_telegram_commands()  
-            if IS_RUNNING:
-                current_time = datetime.now().strftime("%H:%M:%S")
-                print(f"[{current_time}] 지정 종목 레이더 작동 중...")
+        check_telegram_commands()  
+        if IS_RUNNING:
+            print("[스캐너] 지정 종목 실시간 수급 추적 진행 중...")
+            token = get_kiwoom_access_token()
+            
+            if token:
+                for s in real_target_pool:
+                    live_data = fetch_kiwoom_stock_data(s["code"], token)
+                    if live_data:
+                        day_df, min_df, cur_price, mkt_cap, deal_val, tick_deals = live_data
+                        is_ok, tech = analyze_strategy_conditions(day_df, min_df, cur_price, mkt_cap, deal_val, tick_deals)
+                        if is_ok:
+                            s.update({"price": cur_price, "mkt_cap": mkt_cap, "deal_val": deal_val, **tech})
+                            
+                            # 알림 문자 포맷 연산 간소화 기법 이식 (문법 에러 소지 원천 차단)
+                            msg = f"<b>🚨 [실전 추천] 조건 포착</b>\n• 종목: {s['name']}\n• 현재가: {cur_price:,}원 ({tech['rate']})\n• RSI: {tech['rsi']} / BB: {tech['bb_touch']}\n• 이평: {tech['golden_cross']}\n• 최대체결: {tech['max_deal']}"
+                            requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "HTML"})
+            else:
+                print("▪️ [안내] 키움 토큰 미연결 상태 (장외 대기 패턴)")
                 
-                token = get_kiwoom_access_token()
-                matched_list = []
-                
-                if token:
-                    for s in real_target_pool:
-                        live_data = fetch_kiwoom_stock_data(s["code"], token)
-                        if live_data:
-                            day_df, min_df, cur_price, mkt_cap, deal_val, tick_deals = live_data
-                            is_ok, tech = analyze_strategy_conditions(day_df, min_df, cur_price, mkt_cap, deal_val, tick_deals)
-                            if is_ok:
-                                s.update({"price": cur_price, "mkt_cap": mkt_cap, "deal_val": deal_val, **tech})
-                                matched_list.append(s)
-                    
-                    if matched_list:
-                        msg = f"<b>🚨 [실전 추천] 수급 집중 우상향 눌림·돌파 포착</b>\n"
-                        msg += f"⏱️ 포착 시간: {datetime.now().strftime('%H:%M:%S')}\n\n"
-                        for i, stock in enumerate(matched_list, 1):
-                            msg += f"{i}. <b>{stock['name']}</b> ({stock['code']})\n"
-                            msg += f"   • 현재가: {stock['price']:,}원 ({stock['rate']})\n"
-                            msg += f"   • 분봉 지표: RSI {stock['rsi']} / BB하단: {stock['bb_touch']}\n"
-                            msg += f"   • 분봉 이평: ⚡ <b>{stock['golden_cross']}</b>\n"
-                            msg += f"   • 순간 수급: 💰 건별 최대 체결 <code>{stock['max_deal']}</code>\n\n"
+        time.sleep(LOOP_INTERVAL)
+
+# =========================================================================
+# 6. 메인 구동 부위
+# =========================================================================
+if __name__ == "__main__":
+    monitor_thread = threading.Thread(target=stock_monitoring_loop, daemon=True)
+    monitor_thread.start()
+    
+    print("🚀 Render 웹서비스용 포트 즉시 개방 완료 (Port:10000)")
+    uvicorn.run(app, host="0.0.0.0", port=10000)
