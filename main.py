@@ -13,7 +13,6 @@ import uvicorn
 TOKEN = "8454731178:AAFVCPPT8hzThwE0JuTvE5UveNH79QRGnZ4"
 CHAT_ID = "8987887618"
 
-# 🌟 실제 운영을 위해 본인의 실제 키움 API 키로 변경해 주시면 완벽합니다!
 KIWOOM_APPKEY = "bC0DahcHKXLwG-rfoHMJI2lDf1eqXUNKMEQ1J6EF-Oc"
 KIWOOM_SECRET = "0Tz6YURPv6OADRC35zwDyiFcylTJEoLsDa_sp1hPyAc"
 
@@ -148,11 +147,13 @@ def analyze_strategy_conditions(day_df, min_df, current_price, market_cap, deal_
         return False, None
 
 # =========================================================================
-# 4. 실전 백그라운드 스케줄러 가동 루프 부위 (🌟야간/가짜키 안전장치 장착)
+# 4. 실전 백그라운드 스케줄러 가동 루프 부위
 # =========================================================================
 def stock_monitoring_loop():
-    # 켜지자마자 무조건 신호 전송
-    requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": "<b>🟢 [클라우드] 주식 감시 마스터 서버가 가동되었습니다.</b>\n현재 포착 대기 중입니다.", "parse_mode": "HTML"})
+    # 🌟 서버 실행 즉시가 아니라, 렌더 서버가 완전히 Live 상태로 인식한 후 텔레그램을 보낼 수 있도록 안전 딜레이(10초) 부여
+    time.sleep(10)
+    
+    requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": "<b>🟢 [클라우드] 주식 감시 마스터 서버가 최종 가동되었습니다.</b>\n포착 대기 모드가 활성화되었습니다.", "parse_mode": "HTML"})
     
     real_target_pool = [
         {"code": "005930", "name": "삼성전자"}, {"code": "000660", "name": "SK하이닉스"},
@@ -169,18 +170,15 @@ def stock_monitoring_loop():
     ]
     
     while True:
-        # 🌟 에러로 인해 스케줄러가 통째로 다운되는 현상을 막아주는 강력한 예외 안전 벽
         try:
             check_telegram_commands()  
-            
             if IS_RUNNING:
                 current_time = datetime.now().strftime("%H:%M:%S")
-                print(f"[{current_time}] 키움 실시간 시세 조회 및 전수 검색 중...")
+                print(f"[{current_time}] 지정 종목군 레이더 가동 중...")
                 
                 token = get_kiwoom_access_token()
                 matched_list = []
                 
-                # 토큰이 유효할 때만 내부 데이터 수집 작동 (야간이나 가짜 키일 때는 에러 없이 안전하게 패스됨)
                 if token:
                     for s in real_target_pool:
                         live_data = fetch_kiwoom_stock_data(s["code"], token)
@@ -202,4 +200,9 @@ def stock_monitoring_loop():
                             msg += f"   • 순간 수급: 💰 건별 최대 체결 <code>{stock['max_deal']}</code>\n\n"
                         requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "HTML"})
                 else:
-                    # 야간이나 가짜 키 상태일 때 로그 창에 기록만 남기고 시스템은 유지합니다.
+                    print("▪️ [대기 안내] 키움 토큰 인증 미연결 상태입니다. (장외 시간 혹은 API 키 미등록)")
+        except Exception as loop_error:
+            print(f"🚨 일시적 통신 예외 우회: {loop_error}")
+            
+        time.sleep(LOOP_INTERVAL)
+
