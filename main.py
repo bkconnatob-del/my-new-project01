@@ -75,7 +75,7 @@ def fetch_kiwoom_stock_data(stock_code, access_token):
         return None
 
 # =========================================================================
-# 3. 텔레그램 명령 제어 (오타 수정 완료 🌟)
+# 3. 텔레그램 명령 제어
 # =========================================================================
 def check_telegram_commands():
     global IS_RUNNING
@@ -84,7 +84,6 @@ def check_telegram_commands():
         res = requests.get(url, params={"offset": -1, "timeout": 1}).json()
         results = res.get("result", [])
         if results:
-            # 🌟 기존의 오타(Antiquity)를 완벽히 제거하고 정상적인 대입문으로 수정했습니다.
             last_text = results[-1].get("message", {}).get("text", "")
             if last_text == "/stop" and IS_RUNNING:
                 IS_RUNNING = False
@@ -155,11 +154,10 @@ def analyze_strategy_conditions(day_df, min_df, current_price, market_cap, deal_
 # 5. 실전 백그라운드 스케줄러 가동 루프 부위
 # =========================================================================
 def stock_monitoring_loop():
-    # 렌더 웹 서비스 활성화 대기용 안전 마진 15초
     time.sleep(15)
     
     try:
-        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": "<b>🟢 [클라우드] 주식 감시 마스터 서버가 성공적으로 부팅되었습니다.</b>\n관심종목 21개 감시 진입 완료.", "parse_mode": "HTML"})
+        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": "<b>🟢 [클라우드] 주식 감시 마스터 서버가 성공적으로 가동되었습니다.</b>\n관심종목 21개 실시간 모니터링 시작.", "parse_mode": "HTML"})
     except: pass
     
     real_target_pool = [
@@ -205,3 +203,4 @@ def stock_monitoring_loop():
                             msg += f"   • 분봉 지표: RSI {stock['rsi']} / BB하단: {stock['bb_touch']}\n"
                             msg += f"   • 분봉 이평: ⚡ <b>{stock['golden_cross']}</b>\n"
                             msg += f"   • 순간 수급: 💰 건별 최대 체결 <code>{stock['max_deal']}</code>\n\n"
+                        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "HTML"})
