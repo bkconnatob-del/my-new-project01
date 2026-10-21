@@ -5,7 +5,6 @@ import ta
 import threading
 from datetime import datetime
 from fastapi import FastAPI
-import uvicorn
 
 # =========================================================================
 # 1. 환경 설정 및 텔레그램 / 키움증권 REST API 인증 정보
@@ -21,6 +20,7 @@ LOOP_INTERVAL = 180
 IS_RUNNING = True  
 LAST_UPDATE_ID = None  
 
+# FastAPI 객체 생성 (Render 시스템이 바로 인식하도록 전역 배치)
 app = FastAPI()
 
 @app.get("/")
@@ -28,7 +28,7 @@ def read_root():
     return {"status": "healthy", "bot_running": IS_RUNNING}
 
 # =========================================================================
-# 2. 키움증권 REST API 데이터 수집 모듈 (단순하고 직관적인 구조)
+# 2. 키움증권 REST API 데이터 수집 모듈
 # =========================================================================
 def get_kiwoom_access_token():
     url = "https://kiwoom.com"
@@ -79,7 +79,7 @@ def fetch_kiwoom_stock_data(stock_code, access_token):
     return None
 
 # =========================================================================
-# 3. 텔레그램 명령 제어 (문법 버그 소지 원천 철거 🌟)
+# 3. 텔레그램 명령 제어
 # =========================================================================
 def check_telegram_commands():
     global IS_RUNNING, LAST_UPDATE_ID
@@ -169,13 +169,14 @@ def analyze_strategy_conditions(day_df, min_df, current_price, market_cap, deal_
     return False, None
 
 # =========================================================================
-# 5. 실전 백그라운드 스케줄러 가동 루프 부위
+# 5. 실전 백그라운드 주식 감시 루프
 # =========================================================================
 def stock_monitoring_loop():
-    time.sleep(15)
+    # 렌더 서버 배포 안정화 대기 시간 (20초)
+    time.sleep(20)
     
     try:
-        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": "<b>🟢 [클라우드] 주식 감시 마스터 서버가 가동되었습니다.</b>\n실시간 21개 지정 종목 모니터링 시스템 스캔 작동.", "parse_mode": "HTML"}, timeout=5)
+        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": "<b>🟢 [클라우드] 주식 감시 마스터 서버가 최종 가동되었습니다.</b>\n관심종목 21개 실시간 모니터링 시스템 스캔 작동.", "parse_mode": "HTML"}, timeout=5)
     except: 
         pass
     
@@ -194,25 +195,24 @@ def stock_monitoring_loop():
     ]
     
     while True:
-        check_telegram_commands()  
-        
-        if IS_RUNNING:
-            print("[스캐너] 지정 종목 실시간 수급 추적 진행 중...")
-            token = get_kiwoom_access_token()
+        try:
+            check_telegram_commands()  
             
-            if token:
-                for s in real_target_pool:
-                    live_data = fetch_kiwoom_stock_data(s["code"], token)
-                    if live_data:
-                        day_df, min_df, cur_price, mkt_cap, deal_val, tick_deals = live_data
-                        is_ok, tech = analyze_strategy_conditions(day_df, min_df, cur_price, mkt_cap, deal_val, tick_deals)
-                        if is_ok:
-                            s.update({"price": cur_price, "mkt_cap": mkt_cap, "deal_val": deal_val, **tech})
-                            msg = f"<b>🚨 [실전 추천] 조건 포착</b>\n• 종목: {s['name']}\n• 현재가: {cur_price:,}원 ({tech['rate']})\n• RSI: {tech['rsi']} / BB: {tech['bb_touch']}\n• 이평: {tech['golden_cross']}\n• 최대체결: {tech['max_deal']}"
-                            try:
-                                requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "HTML"}, timeout=3)
-                            except:
-                                pass
-            else:
-                print("▪️ [안내] 키움 토큰 미연결 상태 (장외 대기 패턴)")
+            if IS_RUNNING:
+                print("[스캐너] 지정 종목 실시간 수급 추적 진행 중...")
+                token = get_kiwoom_access_token()
                 
+                if token:
+                    for s in real_target_pool:
+                        live_data = fetch_kiwoom_stock_data(s["code"], token)
+                        if live_data:
+                            day_df, min_df, cur_price, mkt_cap, deal_val, tick_deals = live_data
+                            is_ok, tech = analyze_strategy_conditions(day_df, min_df, cur_price, mkt_cap, deal_val, tick_deals)
+                            if is_ok:
+                                s.update({"price": cur_price, "mkt_cap": mkt_cap, "deal_val": deal_val, **tech})
+                                msg = f"<b>🚨 [실전 추천] 조건 포착</b>\n• 종목: {s['name']}\n• 현재가: {cur_price:,}원 ({tech['rate']})\n• RSI: {tech['rsi']} / BB: {tech['bb_touch']}\n• 이평: {tech['golden_cross']}\n• 최대체결: {tech['max_deal']}"
+                                try:
+                                    requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "HTML"}, timeout=3)
+                                except:
+                                    pass
+                else:
