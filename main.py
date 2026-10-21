@@ -13,6 +13,7 @@ import uvicorn
 TOKEN = "8454731178:AAFVCPPT8hzThwE0JuTvE5UveNH79QRGnZ4"
 CHAT_ID = "8987887618"
 
+# 🌟 사용자님의 실제 키움 API 키가 완벽하게 적용되어 있습니다.
 KIWOOM_APPKEY = "bC0DahcHKXLwG-rfoHMJI2lDf1eqXUNKMEQ1J6EF-Oc"
 KIWOOM_SECRET = "0Tz6YURPv6OADRC35zwDyiFcylTJEoLsDa_sp1hPyAc"
 
@@ -80,7 +81,7 @@ def check_telegram_commands():
         res = requests.get(url, params={"offset": -1, "timeout": 1}).json()
         results = res.get("result", [])
         if results:
-            last_text = results[-1].get("message", {}).get("text", "")
+            last_text = Antiquity = results[-1].get("message", {}).get("text", "")
             if last_text == "/stop" and IS_RUNNING:
                 IS_RUNNING = False
                 requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": "🛑 [클라우드] 장중 자동 감시 엔진을 일시 정지합니다."})
@@ -150,10 +151,9 @@ def analyze_strategy_conditions(day_df, min_df, current_price, market_cap, deal_
 # 4. 실전 백그라운드 스케줄러 가동 루프 부위
 # =========================================================================
 def stock_monitoring_loop():
-    # 🌟 서버 실행 즉시가 아니라, 렌더 서버가 완전히 Live 상태로 인식한 후 텔레그램을 보낼 수 있도록 안전 딜레이(10초) 부여
     time.sleep(10)
     
-    requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": "<b>🟢 [클라우드] 주식 감시 마스터 서버가 최종 가동되었습니다.</b>\n포착 대기 모드가 활성화되었습니다.", "parse_mode": "HTML"})
+    requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": "<b><b>🟢 [클라우드] 주식 감시 마스터 서버가 성공적으로 연동되었습니다.</b></b>\n현재 21개 지정 종목 감시 대기 중입니다.", "parse_mode": "HTML"})
     
     real_target_pool = [
         {"code": "005930", "name": "삼성전자"}, {"code": "000660", "name": "SK하이닉스"},
@@ -200,9 +200,6 @@ def stock_monitoring_loop():
                             msg += f"   • 순간 수급: 💰 건별 최대 체결 <code>{stock['max_deal']}</code>\n\n"
                         requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "HTML"})
                 else:
-                    print("▪️ [대기 안내] 키움 토큰 인증 미연결 상태입니다. (장외 시간 혹은 API 키 미등록)")
+                    print("▪️ [대기 안내] 키움 토큰 인증 미연결 상태입니다. (장외 시간 혹은 야간 대기)")
         except Exception as loop_error:
             print(f"🚨 일시적 통신 예외 우회: {loop_error}")
-            
-        time.sleep(LOOP_INTERVAL)
-
