@@ -10,14 +10,18 @@ import uvicorn
 # =========================================================================
 # 1. 환경 설정 및 텔레그램 / 키움증권 REST API 인증 정보
 # =========================================================================
-TOKEN = "8454731178:AAFVCPPT8hzThwE0JuTvE5UveNH79QRGnZ4"
-CHAT_ID = "8987887618"
+# TOKEN = "8454731178:AAFVCPPT8hzThwE0JuTvE5UveNH79QRGnZ4"
+# CHAT_ID = "8987887618"
+TOKEN = os.environ.get("TOKEN")
+CHAT_ID = os.environ.get("CHAT_ID")
 
 # 🌟 사용자님의 실제 키움 API 키 정보가 정확히 이식되어 있습니다.
-KIWOOM_APPKEY = "bCODahcHXXLWG-rfoHMJ12lDf1eqXUNMKEQlJ6EF-Oc"
-KIWOOM_SECRET = "0TZGYURPv6OADRC35zwDy1FcylTJFoLsDa_sp1hPyAc"
+# KIWOOM_APPKEY = "QJcbiuR2b3gwKGbuq1nqVXsDS6ztoKQ5y4gZLIbfftY"
+# KIWOOM_SECRET = "W6UypA9f-2ITaAp4jMHIKvqz112jjFNNVDDuMoeThBk"
+KIWOOM_APP_KEY = os.environ.get("KIWOOM_APP_KEY")
+KIWOOM_SECRET_KEY = os.environ.get("KIWOOM_SECRET_KEY")
 
-LOOP_INTERVAL = 180 
+LOOP_INTERVAL = 120 
 IS_RUNNING = True  
 
 app = FastAPI()
