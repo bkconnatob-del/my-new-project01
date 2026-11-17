@@ -29,11 +29,7 @@ def health_check():
 def get_kiwoom_access_token():
     url = f"{KIWOOM_BASE_URL}/oauth2/token"
     headers = {"Content-Type": "application/json;charset=UTF-8"}
-    payload = {
-        "grant_type": "client_credentials",
-        "appkey": KIWOOM_APPKEY,
-        "secretkey": KIWOOM_SECRET
-    }
+    payload = {"grant_type": "client_credentials", "appkey": KIWOOM_APPKEY, "secretkey": KIWOOM_SECRET}
     try:
         res = requests.post(url, headers=headers, json=payload, timeout=10)
         data = res.json()
@@ -58,22 +54,8 @@ def parse_kiwoom_num(val):
 
 def get_top20_volume_codes(access_token):
     url = f"{KIWOOM_BASE_URL}/api/dostk/rkinfo"
-    headers = {
-        "Content-Type": "application/json;charset=UTF-8",
-        "authorization": f"Bearer {access_token}",
-        "api-id": "ka10030"
-    }
-    payload = {
-        "mrkt_tp": "000",
-        "sort_tp": "1",
-        "mang_stk_incls": "0",
-        "crd_tp": "0",
-        "trde_qty_tp": "0",
-        "pric_tp": "0",
-        "trde_prica_tp": "0",
-        "mrkt_open_tp": "0",
-        "stex_tp": "1"
-    }
+    headers = {"Content-Type": "application/json;charset=UTF-8", "authorization": f"Bearer {access_token}", "api-id": "ka10030"}
+    payload = {"mrkt_tp": "000", "sort_tp": "1", "mang_stk_incls": "0", "crd_tp": "0", "trde_qty_tp": "0", "pric_tp": "0", "trde_prica_tp": "0", "mrkt_open_tp": "0", "stex_tp": "1"}
     try:
         res = requests.post(url, headers=headers, json=payload, timeout=10).json()
         items = res.get("tdy_trde_qty_upper", []) or res.get("output", [])
@@ -88,10 +70,7 @@ def get_top20_volume_codes(access_token):
         return set()
 
 def fetch_stock_detail_and_rsi(stock_code, access_token):
-    base_headers = {
-        "Content-Type": "application/json;charset=UTF-8",
-        "authorization": f"Bearer {access_token}"
-    }
+    base_headers = {"Content-Type": "application/json;charset=UTF-8", "authorization": f"Bearer {access_token}"}
     info_url = f"{KIWOOM_BASE_URL}/api/dostk/stkinfo"
     info_headers = {**base_headers, "api-id": "ka10001"}
     chart_url = f"{KIWOOM_BASE_URL}/api/dostk/chart"
@@ -99,9 +78,7 @@ def fetch_stock_detail_and_rsi(stock_code, access_token):
     today_str = datetime.now().strftime("%Y%m%d")
 
     try:
-        res_info = requests.post(
-            info_url, headers=info_headers, json={"stk_cd": stock_code}, timeout=10
-        ).json()
+        res_info = requests.post(info_url, headers=info_headers, json={"stk_cd": stock_code}, timeout=10).json()
         if str(res_info.get("return_code", "0")) != "0":
             print(f"[기본정보 오류 - {stock_code}] {res_info.get('return_msg')}")
             return None
@@ -111,13 +88,7 @@ def fetch_stock_detail_and_rsi(stock_code, access_token):
         flu_rt = parse_kiwoom_num(res_info.get("flu_rt"))
         trde_prica = abs(parse_kiwoom_num(res_info.get("trde_prica")))
 
-        res_chart = requests.post(
-            chart_url,
-            headers=chart_headers,
-            json={"stk_cd": stock_code, "base_dt": today_str, "upd_stkpc_tp": "1"},
-            timeout=10
-        ).json()
-
+        res_chart = requests.post(chart_url, headers=chart_headers, json={"stk_cd": stock_code, "base_dt": today_str, "upd_stkpc_tp": "1"}, timeout=10).json()
         chart_list = res_chart.get("stk_dt_pole_chart_qry", []) or res_chart.get("output", [])
         rsi_val = None
         if len(chart_list) >= 20:
@@ -127,13 +98,7 @@ def fetch_stock_detail_and_rsi(stock_code, access_token):
             if not pd.isna(rsi_series.iloc[-1]):
                 rsi_val = round(float(rsi_series.iloc[-1]), 2)
 
-        return {
-            "cur_price": cur_price,
-            "open_price": open_price,
-            "flu_rt": flu_rt,
-            "trde_prica_million": trde_prica,
-            "rsi": rsi_val
-        }
+        return {"cur_price": cur_price, "open_price": open_price, "flu_rt": flu_rt, "trde_prica_million": trde_prica, "rsi": rsi_val}
     except Exception as e:
         print(f"[종목 조회 예외 - {stock_code}] {e}")
         return None
@@ -189,11 +154,9 @@ def evaluate_or_conditions(stock_code, data, top20_codes):
 
 def stock_monitoring_loop():
     time.sleep(10)
-    boot_msg = "\n".join([
-        "<b>🟢 [클라우드] 키움 REST API 주식 감시 서버가 부팅되었습니다.</b>",
-        "• 감시 조건(OR): +15%↑ / -24%↓ / 거래대금 300억↑ / 거래상위 20 / RSI≤35",
-        "• 관심종목 시초가 대비 등락 브리핑: 30분 주기"
-    ])
+    boot_msg = "<b>🟢 [클라우드] 키움 REST API 주식 감시 서버가 부팅되었습니다.</b>\n"
+    boot_msg += "• 감시 조건(OR): +15%↑ / -24%↓ / 거래대금 300억↑ / 거래상위 20 / RSI≤35\n"
+    boot_msg += "• 관심종목 시초가 대비 등락 브리핑: 30분 주기"
     send_telegram_message(boot_msg)
 
     real_target_pool = [
@@ -255,9 +218,7 @@ def stock_monitoring_loop():
                                 icon = "🔵 하락"
                             else:
                                 icon = "⚪ 보합"
-                            summary_lines.append(
-                                f"• <b>{name}</b>: {cur_price:,}원 (시초 {open_price:,} 대비 {icon} <b>{open_diff_rt:+.2f}%</b>)"
-                            )
+                            summary_lines.append(f"• <b>{name}</b>: {cur_price:,}원 (시초 {open_price:,} 대비 {icon} <b>{open_diff_rt:+.2f}%</b>)")
 
                         is_matched, reasons = evaluate_or_conditions(code, info, top20_codes)
                         if is_matched:
@@ -265,8 +226,16 @@ def stock_monitoring_loop():
                             if (now_ts - last_alert) >= ALERT_COOLDOWN:
                                 trde_eok = info["trde_prica_million"] / 100.0
                                 rsi_txt = f"{info['rsi']}" if info["rsi"] is not None else "집계중"
-                                msg = "\n".join([
-                                    f"<b>🚨 [조건 포착] {name} ({code})</b>",
-                                    f"• 포착 사유: <b>{', '.join(reasons)}</b>",
-                                    f"• 현재가: {cur_price:,}원 (전일대비 {flu_rt:+.2f}%)",
-                                    f"• 시초가: {open_price:,}원",
+                                msg = f"<b>🚨 [조건 포착] {name} ({code})</b>\n"
+                                msg += f"• 포착 사유: <b>{', '.join(reasons)}</b>\n"
+                                msg += f"• 현재가: {cur_price:,}원 (전일대비 {flu_rt:+.2f}%)\n"
+                                msg += f"• 시초가: {open_price:,}원\n"
+                                msg += f"• 거래대금: {trde_eok:,.0f}억원 / 일봉 RSI: {rsi_txt}"
+                                send_telegram_message(msg)
+                                alert_history[code] = now_ts
+
+                    time.sleep(0.5)
+
+                if need_summary and summary_lines:
+                    header = f"<b>📊 [관심종목 시초가 대비 현황] ({datetime.now().strftime('%H:%M')})</b>\n"
+                    send_telegram_message(header + "\n".join(summary_lines))
