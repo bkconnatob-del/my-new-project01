@@ -1,165 +1,235 @@
 import os
 import time
+import threading
+from datetime import datetime
 import requests
 import pandas as pd
 import ta
-import threading
-from datetime import datetime
-from fastapi import FastAPI
 import uvicorn
+from fastapi import FastAPI
 
 # =========================================================================
-# 1. 환경 설정 및 텔레그램 / 키움증권 REST API 인증 정보
+# 1. 환경 설정 (Render Environment Variables에서 자동 로드)
 # =========================================================================
-# TOKEN = "8454731178:AAFVCPPT8hzThwE0JuTvE5UveNH79QRGnZ4"
-# CHAT_ID = "8987887618"
 TOKEN = os.environ.get("TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
+KIWOOM_APPKEY = os.environ.get("KIWOOM_APP_KEY") or os.environ.get("KIWOOM_APPKEY")
+KIWOOM_SECRET = os.environ.get("KIWOOM_SECRET_KEY") or os.environ.get("KIWOOM_SECRET")
 
-# 🌟 사용자님의 실제 키움 API 키 정보가 정확히 이식되어 있습니다.
-# KIWOOM_APPKEY = "QJcbiuR2b3gwKGbuq1nqVXsDS6ztoKQ5y4gZLIbfftY"
-# KIWOOM_SECRET = "W6UypA9f-2ITaAp4jMHIKvqz112jjFNNVDDuMoeThBk"
-KIWOOM_APP_KEY = os.environ.get("KIWOOM_APP_KEY")
-KIWOOM_SECRET_KEY = os.environ.get("KIWOOM_SECRET_KEY")
+# 모의투자 테스트 시에는 "https://mockapi.kiwoom.com" 으로 변경
+KIWOOM_BASE_URL = "https://api.kiwoom.com"
 
-LOOP_INTERVAL = 120 
-IS_RUNNING = True  
+LOOP_INTERVAL = 120       # 전체 감시 주기 (120초 = 2분)
+SUMMARY_INTERVAL = 1800   # 시초가 대비 전 종목 브리핑 주기 (1800초 = 30분)
+ALERT_COOLDOWN = 1800     # 동일 종목 중복 알림 방지 쿨타임 (30분)
+IS_RUNNING = True
 
 app = FastAPI()
 
 @app.get("/")
-def read_root():
-    return {"status": "healthy", "bot_running": IS_RUNNING}
+def health_check():
+    return {"status": "running", "timestamp": datetime.now().isoformat()}
 
 # =========================================================================
-# 2. 키움증권 REST API 데이터 수집 모듈
+# 2. 키움증권 공식 REST API 연동 모듈
 # =========================================================================
 def get_kiwoom_access_token():
-    url = "https://kiwoom.com"
-    payload = {"grant_type": "client_credentials", "appkey": KIWOOM_APPKEY, "secretkey": KIWOOM_SECRET}
+    url = f"{KIWOOM_BASE_URL}/oauth2/token"
+    headers = {"Content-Type": "application/json;charset=UTF-8"}
+    payload = {
+        "grant_type": "client_credentials",
+        "appkey": KIWOOM_APPKEY,
+        "secretkey": KIWOOM_SECRET
+    }
     try:
-        res = requests.post(url, json=payload)
-        return res.json().get("access_token")
-    except:
+        res = requests.post(url, headers=headers, json=payload, timeout=10)
+        data = res.json()
+        token = data.get("token") or data.get("access_token")
+        if not token:
+            print(f"[토큰 발급 실패] 응답: {data}")
+        return token
+    except Exception as e:
+        print(f"[토큰 요청 예외] {e}")
         return None
 
-def fetch_kiwoom_stock_data(stock_code, access_token):
-    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {access_token}"}
-    day_url = "https://kiwoom.com" 
-    min_url = "https://kiwoom.com"
-    tick_url = "https://kiwoom.com"
+def parse_kiwoom_num(val):
+    """키움 API 응답의 부호(+/-) 및 콤마가 포함된 문자열을 숫자로 안전 변환"""
+    if val is None:
+        return 0.0
+    s = str(val).replace(",", "").strip()
+    if not s:
+        return 0.0
+    try:
+        return float(s)
+    except ValueError:
+        return 0.0
+
+def get_top20_volume_codes(access_token):
+    """당일 거래량 상위 20개 종목 코드 조회 (ka10030)"""
+    url = f"{KIWOOM_BASE_URL}/api/dostk/rkinfo"
+    headers = {
+        "Content-Type": "application/json;charset=UTF-8",
+        "authorization": f"Bearer {access_token}",
+        "api-id": "ka10030"
+    }
+    payload = {
+        "mrkt_tp": "000",         # 000: 전체(코스피+코스닥)
+        "sort_tp": "1",           # 1: 거래량순
+        "mang_stk_incls": "0",    # 0: 관리종목 미포함
+        "crd_tp": "0",
+        "trde_qty_tp": "0",
+        "pric_tp": "0",
+        "trde_prica_tp": "0",
+        "mrkt_open_tp": "0",
+        "stex_tp": "1"
+    }
+    try:
+        res = requests.post(url, headers=headers, json=payload, timeout=10).json()
+        items = res.get("tdy_trde_qty_upper", []) or res.get("output", [])
+        top_codes = set()
+        for item in items[:20]:
+            code = str(item.get("stk_cd", "")).replace("_AL", "").replace("_NX", "").strip()
+            if code:
+                top_codes.add(code)
+        return top_codes
+    except Exception as e:
+        print(f"[거래상위 20 조회 오류] {e}")
+        return set()
+
+def fetch_stock_detail_and_rsi(stock_code, access_token):
+    """주식기본정보(ka10001) + 일봉차트(ka10081) 조회 후 시세 및 RSI 계산"""
+    base_headers = {
+        "Content-Type": "application/json;charset=UTF-8",
+        "authorization": f"Bearer {access_token}"
+    }
+    
+    # 1) 주식기본정보요청 (ka10001)
+    info_url = f"{KIWOOM_BASE_URL}/api/dostk/stkinfo"
+    info_headers = {**base_headers, "api-id": "ka10001"}
+    
+    # 2) 주식일봉차트조회요청 (ka10081)
+    chart_url = f"{KIWOOM_BASE_URL}/api/dostk/chart"
+    chart_headers = {**base_headers, "api-id": "ka10081"}
+    today_str = datetime.now().strftime("%Y%m%d")
     
     try:
-        res_day = requests.get(day_url, headers=headers, params={"stock_code": stock_code, "count": "65"}).json()
-        day_list = res_day.get("output", [])[::-1]
-        df_day = pd.DataFrame(day_list)
-        df_day["close"] = df_day["close_price"].astype(int)
-        df_day["volume"] = df_day["acc_volume"].astype(int)
+        res_info = requests.post(
+            info_url, headers=info_headers, json={"stk_cd": stock_code}, timeout=10
+        ).json()
         
-        res_min = requests.get(min_url, headers=headers, params={"stock_code": stock_code, "minute_type": "5", "count": "50"}).json()
-        min_list = res_min.get("output", [])[::-1]
-        df_min = pd.DataFrame(min_list)
-        df_min["close"] = df_min["close_price"].astype(float)
-        df_min["low"] = df_min["low_price"].astype(float)
-        
-        summary_info = res_day.get("summary", {})
-        current_price = int(summary_info.get("current_price", 0))
-        market_cap = int(summary_info.get("market_cap_amount", 0)) 
-        deal_value = int(summary_info.get("acc_deal_amount", 0)) 
-        
-        res_tick = requests.get(tick_url, headers=headers, params={"stock_code": stock_code}).json()
-        tick_list = res_tick.get("output", [])
-        tick_deals = []
-        for t in tick_list:
-            volume = int(t.get("tick_volume", 0))
-            price = int(t.get("tick_price", 0))
-            tick_deals.append(volume * price)
+        if str(res_info.get("return_code", "0")) != "0":
+            print(f"[기본정보 오류 - {stock_code}] {res_info.get('return_msg')}")
+            return None
             
-        return df_day, df_min, current_price, market_cap, deal_value, tick_deals
-    except:
+        cur_price = abs(int(parse_kiwoom_num(res_info.get("cur_prc"))))
+        open_price = abs(int(parse_kiwoom_num(res_info.get("open_pric"))))
+        flu_rt = parse_kiwoom_num(res_info.get("flu_rt"))          # 전일 대비 등락률 (%)
+        trde_prica = abs(parse_kiwoom_num(res_info.get("trde_prica"))) # 누적 거래대금 (백만원 단위)
+        
+        # 일봉 차트 조회하여 RSI(14) 계산
+        res_chart = requests.post(
+            chart_url,
+            headers=chart_headers,
+            json={"stk_cd": stock_code, "base_dt": today_str, "upd_stkpc_tp": "1"},
+            timeout=10
+        ).json()
+        
+        chart_list = res_chart.get("stk_dt_pole_chart_qry", []) or res_chart.get("output", [])
+        rsi_val = None
+        if len(chart_list) >= 20:
+            # 최신 데이터가 앞에 오므로 과거->최신 순으로 역정렬
+            closes = [abs(parse_kiwoom_num(row.get("cur_prc"))) for row in reversed(chart_list[:60])]
+            series_close = pd.Series(closes)
+            rsi_series = ta.momentum.rsi(close=series_close, window=14)
+            if not pd.isna(rsi_series.iloc[-1]):
+                rsi_val = round(float(rsi_series.iloc[-1]), 2)
+                
+        return {
+            "cur_price": cur_price,
+            "open_price": open_price,
+            "flu_rt": flu_rt,
+            "trde_prica_million": trde_prica,  # 백만원 단위 (300억 = 30,000 백만원)
+            "rsi": rsi_val
+        }
+    except Exception as e:
+        print(f"[종목 조회 예외 - {stock_code}] {e}")
         return None
+
+# =========================================================================
+# 3. 텔레그램 알림 및 명령어 수신
+# =========================================================================
+def send_telegram_message(text):
+    if not TOKEN or not CHAT_ID:
+        print("[경고] TOKEN 또는 CHAT_ID 환경변수가 설정되지 않았습니다.")
+        return
+    try:
+        url = f"https://telegram.org{TOKEN}/sendMessage"
+        requests.post(url, json={"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML"}, timeout=10)
+    except Exception as e:
+        print(f"[텔레그램 전송 오류] {e}")
 
 def check_telegram_commands():
     global IS_RUNNING
-    url = f"https://api.telegram.org/bot{TOKEN}/getUpdates"
+    if not TOKEN:
+        return
+    url = f"https://telegram.org{TOKEN}/getUpdates"
     try:
-        res = requests.get(url, params={"offset": -1, "timeout": 1}).json()
+        res = requests.get(url, params={"offset": -1, "timeout": 1}, timeout=5).json()
         results = res.get("result", [])
         if results:
-            last_text = results[-1].get("message", {}).get("text", "")
+            last_text = results[-1].get("message", {}).get("text", "").strip()
             if last_text == "/stop" and IS_RUNNING:
                 IS_RUNNING = False
-                requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": "🛑 [클라우드] 장중 자동 감시 엔진을 일시 정지합니다."})
+                send_telegram_message("🛑 [클라우드] 장중 자동 감시 엔진을 일시 정지합니다.")
             elif last_text == "/start" and not IS_RUNNING:
                 IS_RUNNING = True
-                requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": "🚀 [클라우드] 장중 자동 감시 엔진을 다시 시작합니다."})
-    except: pass
+                send_telegram_message("🚀 [클라우드] 장중 자동 감시 엔진을 다시 시작합니다.")
+    except Exception:
+        pass
 
 # =========================================================================
-# 3. 핵심 전략 조건식 판별 엔진
+# 4. 신규 5대 OR 조건 판별 엔진
 # =========================================================================
-def analyze_strategy_conditions(day_df, min_df, current_price, market_cap, deal_value, tick_deals):
-    try:
-        if market_cap < 3000: return False, None
-        if deal_value < 100: return False, None
-
-        day_df["MA20"] = day_df["close"].rolling(window=20).mean()
-        day_df["MA60"] = day_df["close"].rolling(window=60).mean()
-        latest_day = day_df.iloc[-1]   
-        prev_day = day_df.iloc[-2]     
+def evaluate_or_conditions(stock_code, data, top20_codes):
+    """
+    조건 (OR):
+    1) 당일 +15% 이상 상승
+    2) 당일 -24% 이상 하락 (등락률 <= -24.0%)
+    3) 거래대금 300억 이상 (키움 trde_prica 백만원 단위 기준 >= 30,000)
+    4) 당일 거래량 상위 20개 종목 포함
+    5) 일봉 RSI <= 35
+    """
+    matched_reasons = []
+    
+    flu_rt = data["flu_rt"]
+    trde_prica_m = data["trde_prica_million"]
+    rsi = data["rsi"]
+    
+    if flu_rt >= 15.0:
+        matched_reasons.append(f"급등({flu_rt:+.2f}%)")
+    if flu_rt <= -24.0:
+        matched_reasons.append(f"급락({flu_rt:+.2f}%)")
+    if trde_prica_m >= 30000:
+        trde_eok = trde_prica_m / 100.0
+        matched_reasons.append(f"거래대금 {trde_eok:,.0f}억")
+    if stock_code in top20_codes:
+        matched_reasons.append("당일 거래상위 TOP 20")
+    if rsi is not None and rsi <= 35.0:
+        matched_reasons.append(f"RSI 과매도({rsi})")
         
-        base_price = prev_day["close"]
-        current_rate = ((current_price - base_price) / base_price) * 100
-        if current_rate <= -23.0: return False, None
-
-        cond_5_trend = latest_day["MA20"] > latest_day["MA60"]
-        cond_6_above_ma20 = current_price > latest_day["MA20"]
-        cond_7_volume_explosion = latest_day["volume"] >= prev_day["volume"] * 1.5
-        
-        min_df["RSI"] = ta.momentum.rsi(close=min_df["close"], window=14)
-        bb = ta.volatility.BollingerBands(close=min_df["close"], window=20, window_dev=2)
-        min_df["BB_lower"] = bb.bollinger_lband()
-        
-        min_df["MA5"] = min_df["close"].rolling(window=5).mean()
-        min_df["MA20"] = min_df["close"].rolling(window=20).mean()
-        min_df["MA60"] = min_df["close"].rolling(window=60).mean()
-        latest_min = min_df.iloc[-1]   
-        prev_min = min_df.iloc[-2]
-        
-        gc_20_60 = (latest_min["MA20"] >= latest_min["MA60"]) and (prev_min["MA20"] <= prev_min["MA60"])
-        gc_5_20 = (latest_min["MA5"] >= latest_min["MA20"]) and (prev_min["MA5"] <= prev_min["MA20"])
-        cond_min_golden_cross = gc_20_60 or gc_5_20
-
-        cond_rsi_oversold = latest_min["RSI"] < 30
-        cond_bb_touch = latest_min["low"] <= latest_min["BB_lower"]
-        cond_intraday_dip = cond_rsi_oversold or cond_bb_touch
-        
-        has_big_buyer = any(deal_amount >= 10000000 for deal_amount in tick_deals)
-
-        is_matched = (cond_5_trend and cond_6_above_ma20 and cond_7_volume_explosion) and \
-                     (cond_intraday_dip or cond_min_golden_cross) and \
-                     has_big_buyer
-        
-        gc_type = "20-60선 크로스" if gc_20_60 else ("5-20선 크로스" if gc_5_20 else "미발생")
-        
-        return is_matched, {
-            "rate": f"{current_rate:+.2f}%",
-            "rsi": round(latest_min["RSI"], 1),
-            "bb_touch": "터치" if cond_bb_touch else "미터치",
-            "golden_cross": gc_type,
-            "max_deal": f"{max(tick_deals)/10000:,.0f}만원" if tick_deals else "0원"
-        }
-    except:
-        return False, None
+    return (len(matched_reasons) > 0), matched_reasons
 
 # =========================================================================
-# 4. 실전 백그라운드 스케줄러 가동 루프 부위 (문법 리스크 원천 배제)
+# 5. 실전 백그라운드 감시 루프
 # =========================================================================
 def stock_monitoring_loop():
-    time.sleep(15)
+    time.sleep(10)
     
-    # 안전한 텔레그램 가동 신호 송신
-    requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": "<b>🟢 [클라우드] 주식 감시 마스터 서버가 성공적으로 부팅되었습니다.</b>\n실시간 조건 검색 시스템이 작동합니다.", "parse_mode": "HTML"})
+    send_telegram_message(
+        "<b>🟢 [클라우드] 키움 REST API 주식 감시 서버가 부팅되었습니다.</b>\n"
+        "• 감시 조건(OR): +15%↑ / -24%↓ / 거래대금 300억↑ / 거래상위 20 / RSI≤35\n"
+        "• 관심종목 시초가 대비 등락 브리핑: 30분 주기"
+    )
     
     real_target_pool = [
         {"code": "005930", "name": "삼성전자"}, {"code": "000660", "name": "SK하이닉스"},
@@ -175,35 +245,22 @@ def stock_monitoring_loop():
         {"code": "425420", "name": "나노팀"}
     ]
     
+    last_summary_time = 0
+    alert_history = {}  # 종목별 마지막 조건 포착 알림 시각 기록
+    
     while True:
-        check_telegram_commands()  
+        check_telegram_commands()
         if IS_RUNNING:
-            print("[스캐너] 지정 종목 실시간 수급 추적 진행 중...")
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] 키움 REST API 스캔 시작...")
             token = get_kiwoom_access_token()
             
             if token:
-                for s in real_target_pool:
-                    live_data = fetch_kiwoom_stock_data(s["code"], token)
-                    if live_data:
-                        day_df, min_df, cur_price, mkt_cap, deal_val, tick_deals = live_data
-                        is_ok, tech = analyze_strategy_conditions(day_df, min_df, cur_price, mkt_cap, deal_val, tick_deals)
-                        if is_ok:
-                            s.update({"price": cur_price, "mkt_cap": mkt_cap, "deal_val": deal_val, **tech})
-                            
-                            # 알림 문자 포맷 연산 간소화 기법 이식 (문법 에러 소지 원천 차단)
-                            msg = f"<b>🚨 [실전 추천] 조건 포착</b>\n• 종목: {s['name']}\n• 현재가: {cur_price:,}원 ({tech['rate']})\n• RSI: {tech['rsi']} / BB: {tech['bb_touch']}\n• 이평: {tech['golden_cross']}\n• 최대체결: {tech['max_deal']}"
-                            requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "HTML"})
-            else:
-                print("▪️ [안내] 키움 토큰 미연결 상태 (장외 대기 패턴)")
+                now_ts = time.time()
+                need_summary = (now_ts - last_summary_time) >= SUMMARY_INTERVAL
+                summary_lines = []
                 
-        time.sleep(LOOP_INTERVAL)
-
-# =========================================================================
-# 6. 메인 구동 부위
-# =========================================================================
-if __name__ == "__main__":
-    monitor_thread = threading.Thread(target=stock_monitoring_loop, daemon=True)
-    monitor_thread.start()
-    
-    print("🚀 Render 웹서비스용 포트 즉시 개방 완료 (Port:10000)")
-    uvicorn.run(app, host="0.0.0.0", port=10000)
+                # 당일 거래량 상위 20개 종목 코드 먼저 조회
+                top20_codes = get_top20_volume_codes(token)
+                time.sleep(0.3)
+                
+                for s in real_target_pool:
