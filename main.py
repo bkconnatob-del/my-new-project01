@@ -97,7 +97,7 @@ def fetch_stock_detail_and_rsi(stock_code, access_token):
     chart_url = f"{KIWOOM_BASE_URL}/api/dostk/chart"
     chart_headers = {**base_headers, "api-id": "ka10081"}
     today_str = datetime.now().strftime("%Y%m%d")
-    
+
     try:
         res_info = requests.post(
             info_url, headers=info_headers, json={"stk_cd": stock_code}, timeout=10
@@ -105,19 +105,19 @@ def fetch_stock_detail_and_rsi(stock_code, access_token):
         if str(res_info.get("return_code", "0")) != "0":
             print(f"[기본정보 오류 - {stock_code}] {res_info.get('return_msg')}")
             return None
-            
+
         cur_price = abs(int(parse_kiwoom_num(res_info.get("cur_prc"))))
         open_price = abs(int(parse_kiwoom_num(res_info.get("open_pric"))))
         flu_rt = parse_kiwoom_num(res_info.get("flu_rt"))
         trde_prica = abs(parse_kiwoom_num(res_info.get("trde_prica")))
-        
+
         res_chart = requests.post(
             chart_url,
             headers=chart_headers,
             json={"stk_cd": stock_code, "base_dt": today_str, "upd_stkpc_tp": "1"},
             timeout=10
         ).json()
-        
+
         chart_list = res_chart.get("stk_dt_pole_chart_qry", []) or res_chart.get("output", [])
         rsi_val = None
         if len(chart_list) >= 20:
@@ -126,7 +126,7 @@ def fetch_stock_detail_and_rsi(stock_code, access_token):
             rsi_series = ta.momentum.rsi(close=series_close, window=14)
             if not pd.isna(rsi_series.iloc[-1]):
                 rsi_val = round(float(rsi_series.iloc[-1]), 2)
-                
+
         return {
             "cur_price": cur_price,
             "open_price": open_price,
@@ -172,7 +172,7 @@ def evaluate_or_conditions(stock_code, data, top20_codes):
     flu_rt = data["flu_rt"]
     trde_prica_m = data["trde_prica_million"]
     rsi = data["rsi"]
-    
+
     if flu_rt >= 15.0:
         matched_reasons.append(f"급등({flu_rt:+.2f}%)")
     if flu_rt <= -24.0:
@@ -184,58 +184,69 @@ def evaluate_or_conditions(stock_code, data, top20_codes):
         matched_reasons.append("당일 거래상위 TOP 20")
     if rsi is not None and rsi <= 35.0:
         matched_reasons.append(f"RSI 과매도({rsi})")
-        
+
     return (len(matched_reasons) > 0), matched_reasons
 
 def stock_monitoring_loop():
     time.sleep(10)
-    send_telegram_message(
-        "<b>🟢 [클라우드] 키움 REST API 주식 감시 서버가 부팅되었습니다.</b>\n"
-        "• 감시 조건(OR): +15%↑ / -24%↓ / 거래대금 300억↑ / 거래상위 20 / RSI≤35\n"
+    boot_msg = "\n".join([
+        "<b>🟢 [클라우드] 키움 REST API 주식 감시 서버가 부팅되었습니다.</b>",
+        "• 감시 조건(OR): +15%↑ / -24%↓ / 거래대금 300억↑ / 거래상위 20 / RSI≤35",
         "• 관심종목 시초가 대비 등락 브리핑: 30분 주기"
-    )
-    
+    ])
+    send_telegram_message(boot_msg)
+
     real_target_pool = [
-        {"code": "005930", "name": "삼성전자"}, {"code": "000660", "name": "SK하이닉스"},
-        {"code": "005380", "name": "현대차"}, {"code": "004980", "name": "성신양회"},
-        {"code": "010170", "name": "대한광통신"}, {"code": "011070", "name": "LG이노텍"},
-        {"code": "015760", "name": "한국전력"}, {"code": "0161M0", "name": "네오사피엔스"},
-        {"code": "018250", "name": "애경산업"}, {"code": "032640", "name": "LG유플러스"},
-        {"code": "034020", "name": "두산에너빌리티"}, {"code": "041020", "name": "폴라리스AI"},
-        {"code": "082740", "name": "한화엔진"}, {"code": "190510", "name": "나무가"},
-        {"code": "199430", "name": "제일일렉트릭"}, {"code": "201490", "name": "미투온"},
-        {"code": "252110", "name": "한국비앤씨"}, {"code": "263050", "name": "에이비엘바이오"},
-        {"code": "373200", "name": "대모"}, {"code": "413040", "name": "엑스게이트"},
+        {"code": "005930", "name": "삼성전자"},
+        {"code": "000660", "name": "SK하이닉스"},
+        {"code": "005380", "name": "현대차"},
+        {"code": "004980", "name": "성신양회"},
+        {"code": "010170", "name": "대한광통신"},
+        {"code": "011070", "name": "LG이노텍"},
+        {"code": "015760", "name": "한국전력"},
+        {"code": "0161M0", "name": "네오사피엔스"},
+        {"code": "018250", "name": "애경산업"},
+        {"code": "032640", "name": "LG유플러스"},
+        {"code": "034020", "name": "두산에너빌리티"},
+        {"code": "041020", "name": "폴라리스AI"},
+        {"code": "082740", "name": "한화엔진"},
+        {"code": "190510", "name": "나무가"},
+        {"code": "199430", "name": "제일일렉트릭"},
+        {"code": "201490", "name": "미투온"},
+        {"code": "252110", "name": "한국비앤씨"},
+        {"code": "263050", "name": "에이비엘바이오"},
+        {"code": "373200", "name": "대모"},
+        {"code": "413040", "name": "엑스게이트"},
         {"code": "425420", "name": "나노팀"}
     ]
-    
+
     last_summary_time = 0
     alert_history = {}
-    
+
     while True:
         check_telegram_commands()
         if IS_RUNNING:
             print(f"[{datetime.now().strftime('%H:%M:%S')}] 키움 REST API 스캔 시작...")
             token = get_kiwoom_access_token()
-            
+
             if token:
                 now_ts = time.time()
                 need_summary = (now_ts - last_summary_time) >= SUMMARY_INTERVAL
                 summary_lines = []
-                
+
                 top20_codes = get_top20_volume_codes(token)
                 time.sleep(0.3)
-                
+
                 for s in real_target_pool:
                     code = s["code"]
                     name = s["name"]
-                    
+
                     info = fetch_stock_detail_and_rsi(code, token)
                     if info:
                         cur_price = info["cur_price"]
                         open_price = info["open_price"]
                         flu_rt = info["flu_rt"]
-                        
+
                         if open_price > 0 and cur_price > 0:
                             open_diff_rt = ((cur_price - open_price) / open_price) * 100
                             if open_diff_rt > 0:
@@ -247,15 +258,15 @@ def stock_monitoring_loop():
                             summary_lines.append(
                                 f"• <b>{name}</b>: {cur_price:,}원 (시초 {open_price:,} 대비 {icon} <b>{open_diff_rt:+.2f}%</b>)"
                             )
-                        
+
                         is_matched, reasons = evaluate_or_conditions(code, info, top20_codes)
                         if is_matched:
                             last_alert = alert_history.get(code, 0)
                             if (now_ts - last_alert) >= ALERT_COOLDOWN:
                                 trde_eok = info["trde_prica_million"] / 100.0
                                 rsi_txt = f"{info['rsi']}" if info["rsi"] is not None else "집계중"
-                                msg = (
-                                    f"<b>🚨 [조건 포착] {name} ({code})</b>\n"
-                                    f"• 포착 사유: <b>{', '.join(reasons)}</b>\n"
-                                    f"• 현재가: {cur_price:,}원 (전일대비 {flu_rt:+.2f}%)\n"
-                                    f"• 시초가: {open_price:,}원\n"
+                                msg = "\n".join([
+                                    f"<b>🚨 [조건 포착] {name} ({code})</b>",
+                                    f"• 포착 사유: <b>{', '.join(reasons)}</b>",
+                                    f"• 현재가: {cur_price:,}원 (전일대비 {flu_rt:+.2f}%)",
+                                    f"• 시초가: {open_price:,}원",
