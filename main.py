@@ -19,7 +19,7 @@ KIWOOM_SECRET = os.environ.get("KIWOOM_SECRET_KEY") or os.environ.get("KIWOOM_SE
 # 모의투자 테스트 시에는 "https://mockapi.kiwoom.com" 으로 변경
 KIWOOM_BASE_URL = "https://api.kiwoom.com"
 
-LOOP_INTERVAL = 120       # 전체 감시 주기 (120초 = 2분)
+LOOP_INTERVAL = 60       # 전체 감시 주기 (120초 = 2분)
 SUMMARY_INTERVAL = 1800   # 시초가 대비 전 종목 브리핑 주기 (1800초 = 30분)
 ALERT_COOLDOWN = 1800     # 동일 종목 중복 알림 방지 쿨타임 (30분)
 IS_RUNNING = True
