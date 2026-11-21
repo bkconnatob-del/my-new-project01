@@ -153,7 +153,7 @@ def evaluate_or_conditions(stock_code, data, top20_codes):
     return (len(matched_reasons) > 0), matched_reasons
 
 def stock_monitoring_loop():
-    time.sleep(10)
+    time.sleep(5)
     boot_msg = "<b>🟢 [클라우드] 키움 REST API 주식 감시 서버가 부팅되었습니다.</b>\n"
     boot_msg += "• 감시 조건(OR): +15%↑ / -24%↓ / 거래대금 300억↑ / 거래상위 20 / RSI≤35\n"
     boot_msg += "• 관심종목 시초가 대비 등락 브리핑: 30분 주기"
